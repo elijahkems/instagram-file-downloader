@@ -4,7 +4,7 @@ const https = require("https");
 const fs = require("fs");
 const process = require("process");
 const readline = require("readline");
-const { response } = require("express");
+const { resolve } = require("path/posix");
 
 //remove unwnated last part of the link
 function getCleanUrl(url) {
@@ -46,10 +46,8 @@ async function getCaption(url) {
 
 async function getCaptionFromHtml(html) {
   const root = parse(html);
-
   let caption = root.querySelector(".Caption")?.text;
   if (caption == undefined) caption = "No caption";
-
   caption = caption.replace("view all comments", "");
   return caption;
 }
@@ -58,52 +56,55 @@ function getVideoLinkFromHtml(html) {
   let crop =
     '{"' +
     html.substring(html.search("video_url"), html.search("video_url") + 1000);
-
   crop = crop.substring(0, crop.search(",")) + "}";
-
   return JSON.parse(crop).video_url;
 }
 
-(async () => {})();
-
-function downloadFile(link) {
-  //generate index number for filename
-  fileIndex = fs.readdirSync("./videos", (err, files) => {
-    if (!err) {
-      return true;
-    }
-    console.log(err);
-    return false;
-  });
-
-  //index must not be equal to 0
-  fileIndex = fileIndex.length >= 1 ? fileIndex.length++ : "";
-  //download usign https
-  const req = https.get(link, (res) => {
-    const fileStream = fs.createWriteStream(
-      `./videos/insta_video${fileIndex}.mp4`
-    );
-    res.pipe(fileStream);
-    fileStream.on("finish", () => {
-      fileStream.close();
-      console.log("Done!\n");
-    });
-
-    fileStream.on("error", (err) => {
+async function downloadFile(link) {
+  //return a promise
+  return new Promise((resolve, reject) => {
+    //generate index number for filename
+    fileIndex = fs.readdirSync("./videos", (err, files) => {
+      if (!err) {
+        return true;
+      }
       console.log(err);
+      return false;
     });
-  });
 
-  req.on("error", (err) => {
-    console.log(err);
+    //index must not be equal to 0
+    fileIndex = fileIndex.length >= 1 ? fileIndex.length++ : "";
+    //download usign https
+    const req = https.get(link, (res) => {
+      const fileStream = fs.createWriteStream(
+        `./videos/insta_video${fileIndex}.mp4`
+      );
+      res.pipe(fileStream);
+      fileStream.on("finish", () => {
+        fileStream.close();
+        console.log("Video downloaded");
+        resolve(true);
+      });
+      fileStream.on("error", (err) => {
+        console.log(err);
+        reject(false);
+      });
+    });
+    req.on("error", (err) => {
+      console.log(err);
+      reject(false);
+    });
   });
 }
 //initial all
 async function downloadInit(url) {
   const cleanUrl = getCleanUrl(url);
   const response = await getPostLink(cleanUrl);
-  const isDownloaded = downloadFile(response.link);
-  return isDownloaded;
+  const isDownloaded = await downloadFile(response.link);
+  return new Promise((resolve, reject) => {
+    if (isDownloaded) resolve(true);
+    else reject(false);
+  });
 }
 
 //read terminal until except
@@ -118,9 +119,13 @@ async function waitForUserInput() {
     if (link == "exit") {
       rl.close();
     } else {
-      downloadInit(link).then((response) => {
-        waitForUserInput();
-      });
+      downloadInit(link)
+        .then((response) => {
+          waitForUserInput();
+        })
+        .catch((err) => {
+          console.log(err);
+        });
     }
   });
 }
